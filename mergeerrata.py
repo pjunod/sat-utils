@@ -1,12 +1,4 @@
 #!/usr/bin/env python
-###
-###
-###    To-DO
-###	1. finish recovery functions
-###	2. modify start to check for recovery files -- done
-###	3. add option to process recovery files -- done
-###	4. add section for RHSA advisories only -- done
-###	5. add config file for defining channels to clone/merge
 
 import getpass
 import socket
@@ -19,6 +11,8 @@ import os
 import glob
 from optparse import OptionParser
 import ConfigParser
+import datetime
+from dateutil.relativedelta import *
 
 SUPPORTED_SATELLITE_VERSION = '5.2.0'
 
@@ -61,6 +55,7 @@ def mergeChannelErrata(client, key, origin_channel, dest_channel, start_date, en
     except Exception, e:
 	#define path for log files and rec files in config
 	print "Problem occurred merging errata.\n"
+	print "Problem: [%s]\n" % e
 	sys.exit(5)
     return resp
 
@@ -245,7 +240,12 @@ def main():
 #        origin = options.origin
 #        destination = options.destination
         beginning = options.beginning
-        end = options.end
+	if options.end == "lastmonth":
+	    end = str(datetime.date.today()+relativedelta(months=-1))
+	    print "Calculated end date is: [%s]" % end
+	else:
+            end = options.end
+
 	# If config file specified, ignore this option
 	if options.config:
 	    rhsa = options.rhsa_only
@@ -256,7 +256,16 @@ def main():
     if not options.password:
      password = getpass.getpass("%s's password:" % login)
     else:
-     password = options.password
+	if options.password == "auto":
+	    try:
+		pf = open("/etc/rhn/%s-password" % login, "r")
+		password = pf.readline()
+		pf.close()
+	    except:
+		print "Unable to get password from /etc/rhn/%s-password\n" % login 
+		sys.exit(100)
+	else:
+     	    password = options.password
 
     # login to the satellite to get our client obj and session key
     print "* Logging into RHN Satellite"
@@ -300,11 +309,13 @@ def main():
     allchans = parseConfig(config, chanlist, "ALL")
 
     for src,dst in allchans:
+	print "Syncing source channel [%s] to destination channel [%s]\n" % (src,dst)
 	errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
 
     rhsachans = parseConfig(config, chanlist, "RHSA")
     rhsa = 1
     for src,dst in rhsachans:
+	print "Syncing RHSA-only source channel [%s] to destination channel [%s]\n" % (src,dst)
 	errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
     
 
