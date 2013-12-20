@@ -1,26 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: iso-8859-15 -*-
-# Copyright (C) 2013  Paul Junod (donujp@gmail.com)
-
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
-
-# File Name : mergeerrata.py
-# Creation Date : 
-# Created By : Paul Junod
-# Last Modified : 
-# Purpose : Enable cloned RHN Satellite channels to be syncronized from cron
 
 import getpass
 import socket
@@ -227,12 +205,12 @@ def main():
 
     parser = OptionParser()
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
-    parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution", metavar="PASSWORD", default=None)
+    parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/\$user-password", metavar="PASSWORD", default=None)
     parser.add_option("-s", "--server", dest="serverfqdn", type="string", help="FQDN of satellite server - omit https://", metavar="SERVERFQDN")
     parser.add_option("-o", "--origin", dest="origin", type="string", help="Specify the original channel label", metavar="ORIGIN", default=None)
     parser.add_option("-d", "--destination", dest="destination", type="string", help="Specify the destination channel label", metavar="DESTINATION", default=None)
     parser.add_option("-b", "--beginning", dest="beginning", type="string", help="Specify the beginning date. Date is in ISO 8601 (e.g. 2009-09-09) [Default: 2000-01-01", metavar="BEGINNING", default='2000-01-01')
-    parser.add_option("-e", "--end", dest="end", type="string", help="Specify the end date. Date is in ISO 8601 (e.g. 2009-09-10 for Sept 10th, 2009)", metavar="END", default=None)
+    parser.add_option("-e", "--end", dest="end", type="string", help="Specify the end date. Date is in ISO 8601 (e.g. 2009-09-10 for Sept 10th, 2009). Use \"lastmonth\" to specify errata up to this day last month(used for cron typically).", metavar="END", default=None)
     parser.add_option("-S", "--rhsa-only", dest="rhsa_only", action="store_true", help="Only apply RHSA advisories", metavar="RHSA_ONLY", default=0)
     parser.add_option("-r", "--recovery", dest="recovery", action="store_true", help="Run script in recovery mode if previous run did not successfully complete", metavar="RECOVERY_MODE", default=0)
     parser.add_option("-c", "--config", dest="config", type="string", help="Specify list of source and destination channels to merge errata to.")
@@ -253,12 +231,15 @@ def main():
         print "Must specify login, server, and end date options. See usage:"
         parser.print_help()
         print "\nExample usage:\n"
-        print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t./merge-errata-to-channel.py -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09"
+        print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
+        print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
         print ""
         return 100
     else:
         login = options.username
         serverfqdn = options.serverfqdn
+#        origin = options.origin
+#        destination = options.destination
         beginning = options.beginning
 	if options.end == "lastmonth":
 	    end = str(datetime.date.today()+relativedelta(months=-1))
