@@ -216,9 +216,6 @@ def main():
 
 
     parser = OptionParser()
-   # group = OptionGroup(parser, "Example Usage", "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\nTo update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % (sys.argv[0],sys.argv[0]))
-    #group.add_option("-g", action="store_true", help="Usage Examples")
-    #parser.add_option_group(group)
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
     parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/$user-password", metavar="PASSWORD", default=None)
     parser.add_option("-s", "--server", dest="serverfqdn", type="string", help="FQDN of satellite server - omit https://", metavar="SERVERFQDN")
@@ -245,17 +242,11 @@ def main():
     if not ( options.username and options.serverfqdn and options.end ):
         print "Must specify login, server, and end date options. See usage:"
 	showHelp(parser)
-   #     parser.print_help()
-   #     print "\nExample usage:\n"
-   #     print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
-   #     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
         print ""
         return 100
     else:
         login = options.username
         serverfqdn = options.serverfqdn
-#        origin = options.origin
-#        destination = options.destination
         beginning = options.beginning
 	if options.end == "lastmonth":
 	    end = str(datetime.date.today()+relativedelta(months=-1))
