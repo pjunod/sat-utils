@@ -10,11 +10,17 @@ import signal
 import os
 import glob
 from optparse import OptionParser
+from optparse import OptionGroup
 import ConfigParser
 import datetime
 from dateutil.relativedelta import *
 
 SUPPORTED_SATELLITE_VERSION = '5.2.0'
+
+class mergeCfg():
+    def __init__(self):
+	pass
+
 
 def satelliteLogin(sat_login, sat_passwd, sat_fqdn):
     # input: string login, string passwd, string fqdn
@@ -194,7 +200,13 @@ def parseConfig(config, chanlist, errtype):
 	if src in chanlist and dst in chanlist:
 	    validcfg.append((src,dst))
     return validcfg	
-	
+
+def showHelp(parser):
+    parser.print_help()
+    print "\nExample usage:\n"
+    print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
+    print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
+    
 
 def main():
     SUCCESS = 0
@@ -204,12 +216,15 @@ def main():
 
 
     parser = OptionParser()
+   # group = OptionGroup(parser, "Example Usage", "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\nTo update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % (sys.argv[0],sys.argv[0]))
+    #group.add_option("-g", action="store_true", help="Usage Examples")
+    #parser.add_option_group(group)
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
-    parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/\$user-password", metavar="PASSWORD", default=None)
+    parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/$user-password", metavar="PASSWORD", default=None)
     parser.add_option("-s", "--server", dest="serverfqdn", type="string", help="FQDN of satellite server - omit https://", metavar="SERVERFQDN")
     parser.add_option("-o", "--origin", dest="origin", type="string", help="Specify the original channel label", metavar="ORIGIN", default=None)
     parser.add_option("-d", "--destination", dest="destination", type="string", help="Specify the destination channel label", metavar="DESTINATION", default=None)
-    parser.add_option("-b", "--beginning", dest="beginning", type="string", help="Specify the beginning date. Date is in ISO 8601 (e.g. 2009-09-09) [Default: 2000-01-01", metavar="BEGINNING", default='2000-01-01')
+    parser.add_option("-b", "--beginning", dest="beginning", type="string", help="Specify the beginning date. Date is in ISO 8601 (e.g. 2009-09-09) [Default: 2000-01-01]", metavar="BEGINNING", default='2000-01-01')
     parser.add_option("-e", "--end", dest="end", type="string", help="Specify the end date. Date is in ISO 8601 (e.g. 2009-09-10 for Sept 10th, 2009). Use \"lastmonth\" to specify errata up to this day last month(used for cron typically).", metavar="END", default=None)
     parser.add_option("-S", "--rhsa-only", dest="rhsa_only", action="store_true", help="Only apply RHSA advisories", metavar="RHSA_ONLY", default=0)
     parser.add_option("-r", "--recovery", dest="recovery", action="store_true", help="Run script in recovery mode if previous run did not successfully complete", metavar="RECOVERY_MODE", default=0)
@@ -229,10 +244,11 @@ def main():
 
     if not ( options.username and options.serverfqdn and options.end ):
         print "Must specify login, server, and end date options. See usage:"
-        parser.print_help()
-        print "\nExample usage:\n"
-        print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
-        print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
+	showHelp(parser)
+   #     parser.print_help()
+   #     print "\nExample usage:\n"
+   #     print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
+   #     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
         print ""
         return 100
     else:
