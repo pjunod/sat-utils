@@ -17,11 +17,6 @@ from dateutil.relativedelta import *
 
 SUPPORTED_SATELLITE_VERSION = '5.2.0'
 
-class mergeCfg():
-    def __init__(self):
-	pass
-
-
 def satelliteLogin(sat_login, sat_passwd, sat_fqdn):
     # input: string login, string passwd, string fqdn
     # returns: string session key
@@ -102,6 +97,9 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
     print "* Merging errata from %s to %s between dates %s and %s" % (src, dst, beginning, end)
     # band aid until config class can be created
     origin = src
+    origin_details = sat_client.channel.software.getDetails(sat_sessionkey, origin)
+    origin_arch = origin_details["arch_name"]
+    print "Origin arch is [%s].\n" % origin_arch
     destination = dst
     advisories = []
     # Doing just RHSAs requires an entirely different method of populating the channels...
@@ -138,7 +136,10 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
             result = mergeChannelErrata(sat_client, sat_sessionkey, origin, destination, beginning, end)
     	    if not result:
 		rmBackup("mergeid")
-		sys.exit("No errata to merge\n")
+		#sys.exit("No errata to merge\n")
+		# No errata, so return to get next channel to sync
+		print "no errata for this channel to merge.\n"
+		return
 
         except xmlrpclib.Fault, e:
             print "!!! Got XMLRPC Fault !!!\n\t%s" % e
@@ -160,11 +161,16 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
     try:
 	for i in advisories:
 	    pkgid = sat_client.errata.listPackages(sat_sessionkey,i)
-	    print "Advisory is [%s]\n" % i
-	    print "adding [%s] pkgids to list\n" % len(pkgid)
+	    #print "Advisory is [%s]\n" % i
+	    #print "adding [%s] pkgids to list\n" % len(pkgid)
 	    for a in pkgid:
 		if a["providing_channels"]: 
-	            pkgs.append(a["id"])
+		    print "Pkg [%s] channel validated.\n" % a["id"]
+		    if origin in a["providing_channels"]:
+			print "Pkg [%s] arch [%s] validated.\n" % (a["id"],a["providing_channels"])
+	            	pkgs.append(a["id"])
+		    else:
+			print "Skipping packate:[%s]. Invalid arch [%s]\n" % (a["id"],a["providing_channels"])
 		else:
 		    print "Skipping package:[%s]\t\tChannel:[%s]\n" % (a["id"], a["providing_channels"])
     except xmlrpclib.Fault, e:
@@ -186,7 +192,7 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
     except (xmlrpclib.Fault,xmlrpclib.ProtocolError), e:
 	print "ERROR adding packages to channel [%s]: XMLRPC Fault \n\t%s" % (destination,e)
         print "Writing list of pkg IDs to recovery file.\n"
-        return XMLRPCERR
+        return 
 
     # log out of the satellite for good behavior
     rmBackup("pkgids")
@@ -216,6 +222,9 @@ def main():
 
 
     parser = OptionParser()
+   # group = OptionGroup(parser, "Example Usage", "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\nTo update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % (sys.argv[0],sys.argv[0]))
+    #group.add_option("-g", action="store_true", help="Usage Examples")
+    #parser.add_option_group(group)
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
     parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/$user-password", metavar="PASSWORD", default=None)
     parser.add_option("-s", "--server", dest="serverfqdn", type="string", help="FQDN of satellite server - omit https://", metavar="SERVERFQDN")
@@ -242,11 +251,17 @@ def main():
     if not ( options.username and options.serverfqdn and options.end ):
         print "Must specify login, server, and end date options. See usage:"
 	showHelp(parser)
+   #     parser.print_help()
+   #     print "\nExample usage:\n"
+   #     print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
+   #     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
         print ""
         return 100
     else:
         login = options.username
         serverfqdn = options.serverfqdn
+#        origin = options.origin
+#        destination = options.destination
         beginning = options.beginning
 	if options.end == "lastmonth":
 	    end = str(datetime.date.today()+relativedelta(months=-1))
