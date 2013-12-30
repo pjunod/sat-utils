@@ -14,33 +14,8 @@ from optparse import OptionGroup
 import ConfigParser
 import datetime
 from dateutil.relativedelta import *
-
-SUPPORTED_SATELLITE_VERSION = '5.2.0'
-
-def satelliteLogin(sat_login, sat_passwd, sat_fqdn):
-    # input: string login, string passwd, string fqdn
-    # returns: string session key
-
-    sat_url = "https://%s/rpc/api" % sat_fqdn
-    client = xmlrpclib.Server(sat_url, verbose=0)
-    key = client.auth.login(sat_login, sat_passwd)
-
-    return (client, key)
-
-def satelliteLogout(client, key):
-    # input: session key
-    # returns: error value from logout
-
-    return client.auth.logout(key)
-
-def isSupported(client):
-    # input: xmlrpc client, session key
-    # returns: boolean for supported satellite version
-
-    if client.api.systemVersion() >= SUPPORTED_SATELLITE_VERSION:
-        return True
-
-    return False
+from satellite import *
+import logging
 
 def mkBackup(backup, bktype):
     r = open('/var/satellite/scripts/%s.rec' % bktype, 'w')
@@ -55,8 +30,8 @@ def mergeChannelErrata(client, key, origin_channel, dest_channel, start_date, en
         resp = client.channel.software.mergeErrata(key, origin_channel, dest_channel, start_date, end_date)
     except Exception, e:
 	#define path for log files and rec files in config
-	print "Problem occurred merging errata.\n"
-	print "Problem: [%s]\n" % e
+	logger.critical("Problem occurred merging errata.")
+	logger.exception(e)
 	sys.exit(5)
     return resp
 
@@ -75,31 +50,32 @@ def checkRecover():
     for recFile in recNeeded:
 	if os.path.isfile(recFile):
 	    #Recovery files found. Need to run in recovery mode
-	    print "Recovery files found in /var/satellite/scripts/. Rerun script in recovery mode\n"
+	    logger.critical("Recovery files found in /var/satellite/scripts/. Rerun script in recovery mode")
 	    sys.exit(255)
 
 def recoverStart(sat_client, sat_sessionkey, destination):
     if os.path.isfile("/var/satellite/scripts/pkgids.rec"):
-	print "Package ID recovery file found. Reprocessing....\n"
+	logger.info("Package ID recovery file found. Reprocessing....")
 	z = open("/var/satellite/scripts/pkgids.rec", 'r')
 	entries = z.readlines()
 	z.close()
-	print "entries type is [%s]\n" % type(entries)
+	logger.debug("entries type is [%s]" % type(entries))
 	for a in entries:
-	    print "Recovery adding pkgid [%s]\n" % a.strip()
+	    logger.debug("Recovery adding pkgid [%s]" % a.strip())
 	    addErrataPkgs(sat_client,sat_sessionkey,destination,int(a.strip()))
     else:
-        print "This part not yet written. You should probably go find Paul....\n"
+        logger.critical("This part not yet written. You should probably go find Paul....")
         sys.exit(100)
 
 
-def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
-    print "* Merging errata from %s to %s between dates %s and %s" % (src, dst, beginning, end)
+def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa=0):
+    logger = logging.getLogger(__name__)
+    logger.info("Merging errata from %s to %s between dates %s and %s" % (src, dst, beginning, end))
     # band aid until config class can be created
     origin = src
     origin_details = sat_client.channel.software.getDetails(sat_sessionkey, origin)
     origin_arch = origin_details["arch_name"]
-    print "Origin arch is [%s].\n" % origin_arch
+    logger.debug("Origin arch is [%s].\n" % origin_arch)
     destination = dst
     advisories = []
     # Doing just RHSAs requires an entirely different method of populating the channels...
@@ -110,22 +86,22 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
 	cmp = re.compile('^RHSA')
 	for results in tmpresult:
 	    if cmp.match(results["advisory_name"]):
-		print "Adding Security Advisory [%s]\n" % results["advisory_name"]
+		logger.debug("Adding Security Advisory [%s]\n" % results["advisory_name"])
 		secadv.append(results["advisory_name"].strip())
 	advisories = secadv
 	mkBackup(advisories, "advisories")
-	print "Cloning [%s] errata\n" % len(advisories)
+	logger.info("Cloning [%s] errata\n" % len(advisories))
 	try:
 	    result = sat_client.errata.cloneAsync(sat_sessionkey, destination, advisories)
 	except Exception, e:
-	    print "Error occurred. Errata cloning should continue asynchronously.\n"
+	    logger.warn("Error occurred. Errata cloning should continue asynchronously.")
     else:
-	print "Generating errata list\n"
+	logger.info("Generating errata list")
 	try:
 	    mergelist = sat_client.channel.software.listErrata(sat_sessionkey, origin, beginning, end)
 	except Exception, e:
-	    print "Error occurred generating list of errata to merge\n"
-	    print "Error is [%s]\n" % e
+	    logger.critical("Error occurred generating list of errata to merge")
+	    logger.exception(e)
 	    sys.exit(1)
 	mergeids = []
 	for q in mergelist:
@@ -136,45 +112,45 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
             result = mergeChannelErrata(sat_client, sat_sessionkey, origin, destination, beginning, end)
     	    if not result:
 		rmBackup("mergeid")
-		#sys.exit("No errata to merge\n")
-		# No errata, so return to get next channel to sync
-		print "no errata for this channel to merge.\n"
+		logger.warn("No errata to merge")
 		return
 
         except xmlrpclib.Fault, e:
-            print "!!! Got XMLRPC Fault !!!\n\t%s" % e
+            logger.critical("!!! Got XMLRPC Fault !!!")
+	    logger.exception(e)
             return XMLRPCERR
-        print "\tErrata merged sucessfully"
-	print "\tDisplaying results:\n\n\n"
+        logger.info("Errata merged sucessfully")
+	logger.debug("Displaying results:\n\n\n")
 
 	for results in result:
 	    advisories.append(results["advisory_name"])
-	print "full advisory list is [%s] items long\n" % len(advisories)
+	logger.info("full advisory list is [%s] items long\n" % len(advisories))
 
 	mkBackup(advisories, "advisories")
 	rmBackup("mergeid")
 
 
     # get list of packages from advisory list
-    print "Building package list from [%s] advisories...\n" % len(advisories)
+    logger.info("Building package list from [%s] advisories...\n" % len(advisories))
     pkgs = []
     try:
 	for i in advisories:
 	    pkgid = sat_client.errata.listPackages(sat_sessionkey,i)
-	    #print "Advisory is [%s]\n" % i
-	    #print "adding [%s] pkgids to list\n" % len(pkgid)
+	    logger.debug("Advisory is [%s]" % i)
+	    logger.debug("adding [%s] pkgids to list" % len(pkgid))
 	    for a in pkgid:
 		if a["providing_channels"]: 
-		    print "Pkg [%s] channel validated.\n" % a["id"]
+		    logger.debug("Pkg [%s] channel validated." % a["id"])
 		    if origin in a["providing_channels"]:
-			print "Pkg [%s] arch [%s] validated.\n" % (a["id"],a["providing_channels"])
+			logger.debug("Pkg [%s] arch [%s] validated." % (a["id"],a["providing_channels"]))
 	            	pkgs.append(a["id"])
 		    else:
-			print "Skipping packate:[%s]. Invalid arch [%s]\n" % (a["id"],a["providing_channels"])
+			logger.warn("Skipping package:[%s]. Invalid arch [%s]" % (a["id"],a["providing_channels"]))
 		else:
-		    print "Skipping package:[%s]\t\tChannel:[%s]\n" % (a["id"], a["providing_channels"])
+		    logger.warn("Skipping package:[%s]\t\tChannel:[%s]\n" % (a["id"], a["providing_channels"]))
     except xmlrpclib.Fault, e:
-	print "ERROR: XMLRPC Fault \n\t%s" % e
+	logger.critical("ERROR: XMLRPC Fault")
+	logger.exception(e)
 	return XMLRPCERR
 
     # dedupe array of packages
@@ -185,13 +161,13 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa):
     rmBackup("advisories")
 
     # add packages to channel
-    print "Adding [%s] packages to channel\n" % len(uniqpkgs)
     try:
-    	print "Adding [%s] pkg IDs to channel [%s]\n" % (len(uniqpkgs),destination)
+    	logger.info("Adding [%s] pkg IDs to channel [%s]\n" % (len(uniqpkgs),destination))
 	addErrataPkgs(sat_client,sat_sessionkey,destination,uniqpkgs)
     except (xmlrpclib.Fault,xmlrpclib.ProtocolError), e:
-	print "ERROR adding packages to channel [%s]: XMLRPC Fault \n\t%s" % (destination,e)
-        print "Writing list of pkg IDs to recovery file.\n"
+	logger.critical("ERROR adding packages to channel [%s]" % destination)
+        logger.critical("Writing list of pkg IDs to recovery file.")
+	logger.exception(e)
         return 
 
     # log out of the satellite for good behavior
@@ -212,6 +188,9 @@ def showHelp(parser):
     print "\nExample usage:\n"
     print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
+
+    print "######Logging#####\n\n"
+    print "Stay tuned!\n"
     
 
 def main():
@@ -221,10 +200,16 @@ def main():
     SOCKERR = 27
 
 
+    try:
+        logging.basicConfig(filename='/var/log/mergeerrata.log',level=logging.WARNING,format='%(asctime)s %(levelname)s:  %(message)s')
+        logger = logging.getLogger(__name__)
+    except Exception, e:
+	print "Failed setting up logging.\n\nError: %s\n" % e
+	sys.exit(300)
+
+    logger.info("%s starting" % sys.argv[0])
+
     parser = OptionParser()
-   # group = OptionGroup(parser, "Example Usage", "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\nTo update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % (sys.argv[0],sys.argv[0]))
-    #group.add_option("-g", action="store_true", help="Usage Examples")
-    #parser.add_option_group(group)
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
     parser.add_option("-p", "--password", dest="password", type="string", help="Password for specified user on satellite. If password is not specified it is read in during execution. If set to \"AUTO\", pwd is read from /etc/rhn/$user-password", metavar="PASSWORD", default=None)
     parser.add_option("-s", "--server", dest="serverfqdn", type="string", help="FQDN of satellite server - omit https://", metavar="SERVERFQDN")
@@ -239,9 +224,10 @@ def main():
     (options, args) = parser.parse_args()
 
     if (options.config and (options.origin or options.destination)):
-	print "ERROR: The config file and (source and/or destination) options are mutually exclusive. You must specify EITHER a source and destination channel, OR a config file containing a list of sources and destination channels for merge operations\n"
+	logger.critical("The config file and (source and/or destination) options are mutually exclusive. You must specify EITHER a source and destination channel, OR a config file containing a list of sources and destination channels for merge operations")
 	return 100
     else:
+	logger.info("Config file specified")
 	config = options.config
 
     if (options.origin and options.destination):
@@ -249,23 +235,17 @@ def main():
         destination = options.destination
 
     if not ( options.username and options.serverfqdn and options.end ):
-        print "Must specify login, server, and end date options. See usage:"
+        logger.critical("Must specify login, server, and end date options. See usage")
 	showHelp(parser)
-   #     parser.print_help()
-   #     print "\nExample usage:\n"
-   #     print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t%s -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09\n" % sys.argv[0]
-   #     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
         print ""
         return 100
     else:
         login = options.username
         serverfqdn = options.serverfqdn
-#        origin = options.origin
-#        destination = options.destination
         beginning = options.beginning
 	if options.end == "lastmonth":
 	    end = str(datetime.date.today()+relativedelta(months=-1))
-	    print "Calculated end date is: [%s]" % end
+	    logger.debug("Calculated end date is: [%s]" % end)
 	else:
             end = options.end
 
@@ -285,71 +265,88 @@ def main():
 		password = pf.readline()
 		pf.close()
 	    except:
-		print "Unable to get password from /etc/rhn/%s-password\n" % login 
+		logger.critical("Unable to get password from /etc/rhn/%s-password\n" % login)
 		sys.exit(100)
 	else:
      	    password = options.password
 
     # login to the satellite to get our client obj and session key
-    print "* Logging into RHN Satellite"
+    logger.info("Logging into RHN Satellite")
     try:
         (sat_client, sat_sessionkey) = satelliteLogin(login, password, serverfqdn)
     except (xmlrpclib.Fault,xmlrpclib.ProtocolError), e:
-        print "!!! Got XMLRPC error !!!\n\t%s" % e
-        print "!!! Check Satellite FQDN and login information; You can also look at /var/log/httpd/error_log on the Satellite for more info !!!"
+        logger.critical("!!! Got XMLRPC error !!!")
+        logger.critical("!!! Check Satellite FQDN and login information; You can also look at /var/log/httpd/error_log on the Satellite for more info !!!")
+	logger.exception(e)
         return XMLRPCERR
     except socket.error, e:
-        print "!!! Got socket error !!!\n\n%s" % e
-        print "!!! Could not connect to %s" % serverfqdn
+        logger.critical("!!! Got socket error !!!")
+        logger.critical("!!! Could not connect to %s" % serverfqdn)
+	logger.exception(e)
         return SOCKERR
 
     # check to see if we're supported
-    print "* Checking if Satellite supports necessary calls"
+    logger.debug("Checking if Satellite supports necessary calls")
     try:
         if isSupported(sat_client):
-            print "\tSupported version of Satellite"
+            logger.debug("Supported version of Satellite")
         else:
-            print "\n!!! Unsupported version of Satellite !!!\n!!! Requires Satellite >= v%s !!!" % SUPPORTED_SATELLITE_VERSION
+            logger.critical("!!! Unsupported version of Satellite !!!\n!!! Requires Satellite >= v%s !!!" % SUPPORTED_SATELLITE_VERSION)
             return UNSUPPORTED
     except xmlrpclib.Fault, e:
-        print "!!! Got XMLRPC fault\n\t%s" % e
+        logger.critical("!!! Got XMLRPC fault\n\t%s")
+	logger.exception(e)
         return XMLRPCERR
 
     #check if running in recovery mode
     if recover:
-	print "Running in recovery mode. Beginning recovery...\n"
+	logger.warn("Running in recovery mode. Beginning recovery...")
 	recoverStart(sat_client, sat_sessionkey, destination)
 
     checkRecover()
 
     # Logic to loop over config file and process channel updates
 
-    chanlist = []
-    tmplist = sat_client.channel.listAllChannels(sat_sessionkey)
-    for chan in tmplist:
-	chanlist.append(chan["label"])
+    if config:
+        chanlist = []
+        tmplist = sat_client.channel.listAllChannels(sat_sessionkey)
+        for chan in tmplist:
+	    chanlist.append(chan["label"])
 
-    allchans = parseConfig(config, chanlist, "ALL")
+        try:
+            allchans = parseConfig(config, chanlist, "ALL")
+        except Exception:
+	    allchans = 0
+	    logger.warn("Section [ALL] not found. Skipping...")
 
-    for src,dst in allchans:
-	print "Syncing source channel [%s] to destination channel [%s]\n" % (src,dst)
-	errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
+        if allchans:
+            for src,dst in allchans:
+	        logger.info("Syncing source channel [%s] to destination channel [%s]\n" % (src,dst))
+	        errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end)
 
-    rhsachans = parseConfig(config, chanlist, "RHSA")
-    rhsa = 1
-    for src,dst in rhsachans:
-	print "Syncing RHSA-only source channel [%s] to destination channel [%s]\n" % (src,dst)
-	errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
+        try:
+            rhsachans = parseConfig(config, chanlist, "RHSA")
+        except Exception:
+	    rhsachans = 0
+	    logger.warn("Section [RHSA] not found. Skipping...")
+
+        if rhsachans:
+            rhsa = 1
+            for src,dst in rhsachans:
+	        logger.info("Syncing RHSA-only source channel [%s] to destination channel [%s]\n" % (src,dst))
+	        errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
     
+    else:
+	errataProcess(sat_client, sat_sessionkey, origin, destination, beginning, end)
 
-    print "* Logging out of the Satellite"
+    logger.info("Logging out of the Satellite")
     try:
         satelliteLogout(sat_client, sat_sessionkey)
     except xmlrpclib.Fault, e:
-        print "!!! Got XMLRPC fault !!!\n\t%s" % e
+        logger.critical("!!! Got XMLRPC fault !!!")
+	logger.exception(e)
         return XMLRPCERR
 
-    print "* Operation successful. Check Satellite console"
     return SUCCESS
 
 if __name__ == "__main__":
