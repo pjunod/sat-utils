@@ -18,33 +18,8 @@ import signal
 import os
 import glob
 from optparse import OptionParser
-
-SUPPORTED_SATELLITE_VERSION = '5.2.0'
-
-def satelliteLogin(sat_login, sat_passwd, sat_fqdn):
-    # input: string login, string passwd, string fqdn
-    # returns: string session key
-
-    sat_url = "https://%s/rpc/api" % sat_fqdn
-    client = xmlrpclib.Server(sat_url, verbose=0)
-    key = client.auth.login(sat_login, sat_passwd)
-
-    return (client, key)
-
-def satelliteLogout(client, key):
-    # input: session key
-    # returns: error value from logout
-
-    return client.auth.logout(key)
-
-def isSupported(client):
-    # input: xmlrpc client, session key
-    # returns: boolean for supported satellite version
-
-    if client.api.systemVersion() >= SUPPORTED_SATELLITE_VERSION:
-        return True
-
-    return False
+import logging
+from satellite import *
 
 def main():
     SUCCESS = 0
@@ -65,8 +40,7 @@ def main():
         print "Must specify login, server, and list of pkgids. See usage:"
         parser.print_help()
         print "\nExample usage:\n"
-        #print "To merge errata from Red Hat channel to custom channel up to date 2009-09-09:\n\t./merge-errata-to-channel.py -u admin -p password -s satellite.example.com -o rhel-x86_64-server-5 -d release-5-u1-server-x86_64 -e 2009-09-09"
-        print ""
+	print "To get the name and arch of a given list of package IDs: %s -u admin -s localhost -l pkgidlist.txt\n" % sys.argv[0]
         return 100
     else:
         login = options.username
@@ -109,16 +83,10 @@ def main():
     except IOError, e:
 	print e
 	sys.exit(200)
+
     for i in iter(fh.readline, ''):
         pkgidlist.append(i.rstrip())
 
-#    resultdict = {}
-#	for pkg in pkgidlist:
-#	    name = 
-    #errata = sat_client.packages.listProvidingErrata(sat_sessionkey, int('64291'))
-
-    #print errata
-    #sys.exit()
     for id in pkgidlist:
         pkgname = sat_client.packages.getDetails(sat_sessionkey, int(id))
 	print "ID: [%s]\tArch: [%s]\tName: [%s]" % (id, pkgname["arch_label"], pkgname["name"])
