@@ -230,8 +230,6 @@ def main():
 
     logger = logging.getLogger(__name__)
     try:
-#        logging.basicConfig(filename='/var/log/mergeerrata.log',level=logging.INFO,format='%(asctime)s %(levelname)s:  %(message)s')
-#        logger = logging.getLogger(__name__)
 	logger.setLevel(loglevel)
     except Exception, e:
 	print "Invalid logging level specified. See logging help section.\n"
