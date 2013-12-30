@@ -190,8 +190,8 @@ def showHelp(parser):
     print "To update channels specified in a config file, typically from cron:\n\t%s -u admin -p AUTO -s satellite.example.com -c ./config_file -e lastmonth\n" % sys.argv[0]
 
     print "######Logging#####\n\n"
-    print "Stay tuned!\n"
-    
+    print "-l <loglevel> where loglevel is one of:" 
+    print "\t\tinfo (default)\n\t\twarning\n\t\terror\n\t\tcritical\n\t\tdebug\n"
 
 def main():
     SUCCESS = 0
@@ -199,15 +199,11 @@ def main():
     UNSUPPORTED = 23
     SOCKERR = 27
 
-
-    try:
-        logging.basicConfig(filename='/var/log/mergeerrata.log',level=logging.WARNING,format='%(asctime)s %(levelname)s:  %(message)s')
-        logger = logging.getLogger(__name__)
-    except Exception, e:
-	print "Failed setting up logging.\n\nError: %s\n" % e
-	sys.exit(300)
-
-    logger.info("%s starting" % sys.argv[0])
+    LEVELS = {'debug': logging.DEBUG,
+              'info': logging.INFO,
+              'warning': logging.WARNING,
+              'error': logging.ERROR,
+              'critical': logging.CRITICAL}
 
     parser = OptionParser()
     parser.add_option("-u", "--username", dest="username", type="string", help="User login for satellite", metavar="USERNAME")
@@ -220,8 +216,47 @@ def main():
     parser.add_option("-S", "--rhsa-only", dest="rhsa_only", action="store_true", help="Only apply RHSA advisories", metavar="RHSA_ONLY", default=0)
     parser.add_option("-r", "--recovery", dest="recovery", action="store_true", help="Run script in recovery mode if previous run did not successfully complete", metavar="RECOVERY_MODE", default=0)
     parser.add_option("-c", "--config", dest="config", type="string", help="Specify list of source and destination channels to merge errata to.")
+    parser.add_option("-l", "--loglevel", dest="loglevel", type="string", help="Specify the log level for the script to run under.")
 
     (options, args) = parser.parse_args()
+
+    if options.loglevel:
+	loglevel = options.loglevel
+    else:
+	loglevel = logging.INFO
+
+    LOG_FILENAME = '/var/log/mergeerrata.log'
+    formatter = logging.Formatter( "%(asctime)s %(levelname)s - %(message)s" )
+
+    logger = logging.getLogger(__name__)
+    try:
+#        logging.basicConfig(filename='/var/log/mergeerrata.log',level=logging.INFO,format='%(asctime)s %(levelname)s:  %(message)s')
+#        logger = logging.getLogger(__name__)
+	logger.setLevel(loglevel)
+    except Exception, e:
+	print "Invalid logging level specified. See logging help section.\n"
+	showHelp()
+	sys.exit(300)
+	
+
+    try:
+
+	logfile = logging.FileHandler(LOG_FILENAME)
+	logfile.setLevel(loglevel)
+	logfile.setFormatter(formatter)
+	logger.addHandler(logfile)
+	if os.isatty(sys.stdout.fileno()):
+	    #Attach stdout logger if running from a console
+	    conlog = logging.StreamHandler()
+	    conlog.setLevel(loglevel)
+	    conlog.setFormatter(formatter)
+	    logger.addHandler(conlog)
+	    
+    except Exception, e:
+	print "Failed setting up logging.\n\nError: %s\n" % e
+	sys.exit(300)
+
+    logger.info("%s starting" % sys.argv[0])
 
     if (options.config and (options.origin or options.destination)):
 	logger.critical("The config file and (source and/or destination) options are mutually exclusive. You must specify EITHER a source and destination channel, OR a config file containing a list of sources and destination channels for merge operations")
