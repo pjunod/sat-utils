@@ -1,4 +1,5 @@
 *.pyc
+<<<<<<< HEAD
 *.swp
 # Packages #
 ############
@@ -24,3 +25,5 @@
 .Trashes
 ehthumbs.db
 Thumbs.db
+=======
+>>>>>>> repob/master
