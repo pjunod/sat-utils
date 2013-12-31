@@ -26,6 +26,7 @@ def rmBackup(bktype):
     os.remove('/var/satellite/scripts/%s.rec' % bktype)
 
 def mergeChannelErrata(client, key, origin_channel, dest_channel, start_date, end_date):
+    logger = logging.getLogger(__name__)
     try:
         resp = client.channel.software.mergeErrata(key, origin_channel, dest_channel, start_date, end_date)
     except Exception, e:
@@ -46,6 +47,7 @@ def addErrataPkgs(client, key, target_channel, pkg_id):
     return pkgresp
 
 def checkRecover():
+    logger = logging.getLogger(__name__)
     recNeeded = glob.glob('/var/satellite/scripts/*.rec')
     for recFile in recNeeded:
         if os.path.isfile(recFile):
@@ -54,6 +56,7 @@ def checkRecover():
             sys.exit(255)
 
 def recoverStart(sat_client, sat_sessionkey, destination):
+    logger = logging.getLogger(__name__)
     if os.path.isfile("/var/satellite/scripts/pkgids.rec"):
         logger.info("Package ID recovery file found. Reprocessing....")
         z = open("/var/satellite/scripts/pkgids.rec", 'r')
@@ -291,7 +294,8 @@ def main():
             rhsa = options.rhsa_only
         else:
             rhsa = options.rhsa_only
-            recover = options.recovery
+
+        recover = options.recovery
 
     if not options.password:
         password = getpass.getpass("%s's password:" % login)
