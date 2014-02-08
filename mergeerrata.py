@@ -222,7 +222,7 @@ def main():
         logger.setLevel(loglevel)
     except Exception, e:
         print "Invalid logging level specified. See logging help section.\n"
-        showHelp()
+        showHelp(parser)
         sys.exit(300)
 
     try:
@@ -245,14 +245,20 @@ def main():
 
     if (options.config and (options.origin or options.destination)):
         logger.critical("The config file and (source and/or destination) options are mutually exclusive. You must specify EITHER a source and destination channel, OR a config file containing a list of sources and destination channels for merge operations")
+	showHelp(parser)
         return 100
-    else:
-        logger.info("Config file specified")
-        config = options.config
+
+    config = options.config
 
     if (options.origin and options.destination):
         src = options.origin
-	dst = options.destination
+        dst = options.destination
+    elif (options.config):
+        logger.info("Config file specified")
+    else:
+        logger.critical("Source and destination must both be specified")
+	showHelp(parser)
+        return 100
 
     if not ( options.username and options.serverfqdn and options.end ):
         logger.critical("Must specify login, server, and end date options. See usage")
