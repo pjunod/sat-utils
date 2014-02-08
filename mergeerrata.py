@@ -17,9 +17,6 @@ from dateutil.relativedelta import *
 from satellite import *
 import logging
 
-class channelClone(object):
-    def __init__(self, 
-
 def mkBackup(backup, bktype):
     r = open('/var/satellite/scripts/%s.rec' % bktype, 'w')
     for id in backup:
