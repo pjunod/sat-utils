@@ -26,6 +26,7 @@ def rmBackup(bktype):
     os.remove('/var/satellite/scripts/%s.rec' % bktype)
 
 def mergeChannelErrata(client, key, origin_channel, dest_channel, start_date, end_date):
+    logger = logging.getLogger(__name__)
     try:
         resp = client.channel.software.mergeErrata(key, origin_channel, dest_channel, start_date, end_date)
     except Exception, e:
@@ -46,6 +47,7 @@ def addErrataPkgs(client, key, target_channel, pkg_id):
     return pkgresp
 
 def checkRecover():
+    logger = logging.getLogger(__name__)
     recNeeded = glob.glob('/var/satellite/scripts/*.rec')
     for recFile in recNeeded:
         if os.path.isfile(recFile):
@@ -53,7 +55,8 @@ def checkRecover():
             logger.critical("Recovery files found in /var/satellite/scripts/. Rerun script in recovery mode")
             sys.exit(255)
 
-def recoverStart(sat_client, sat_sessionkey, destination):
+def recoverStart(sat_client, sat_sessionkey, dst):
+    logger = logging.getLogger(__name__)
     if os.path.isfile("/var/satellite/scripts/pkgids.rec"):
         logger.info("Package ID recovery file found. Reprocessing....")
         z = open("/var/satellite/scripts/pkgids.rec", 'r')
@@ -62,7 +65,7 @@ def recoverStart(sat_client, sat_sessionkey, destination):
         logger.debug("entries type is [%s]" % type(entries))
         for a in entries:
             logger.debug("Recovery adding pkgid [%s]" % a.strip())
-            addErrataPkgs(sat_client,sat_sessionkey,destination,int(a.strip()))
+            addErrataPkgs(sat_client,sat_sessionkey,dst,int(a.strip()))
     else:
         logger.critical("This part not yet written. You should probably go find Paul....")
         sys.exit(100)
@@ -71,66 +74,56 @@ def recoverStart(sat_client, sat_sessionkey, destination):
 def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa=0):
     logger = logging.getLogger(__name__)
     logger.info("Merging errata from %s to %s between dates %s and %s" % (src, dst, beginning, end))
-    # band aid until config class can be created
-    origin = src
-    origin_details = sat_client.channel.software.getDetails(sat_sessionkey, origin)
-    origin_arch = origin_details["arch_name"]
-    logger.debug("Origin arch is [%s].\n" % origin_arch)
-    destination = dst
+    src_details = sat_client.channel.software.getDetails(sat_sessionkey, src)
+    src_arch = src_details["arch_name"]
+    logger.debug("Source arch is [%s].\n" % src_arch)
     advisories = []
-    # Doing just RHSAs requires an entirely different method of populating the channels...
+    dsterrata = []
+    mergelist = sat_client.channel.software.listErrata(sat_sessionkey, src, beginning, end)
+    destlist = sat_client.channel.software.listErrata(sat_sessionkey, dst, beginning, end)
+    for errata in destlist:
+        dsterrata.append(errata["advisory_name"].split('-')[1])
+
+    ### For backup/resume purposes
+    mergeids = []
+    for q in mergelist:
+        mergeids.append(q["id"])
+    mkBackup(mergeids, "mergeid")
+
+    # Filter out just RHSAs for security-only updates
     if rhsa:
-        tmpresult = sat_client.channel.software.listErrata(sat_sessionkey, origin, beginning, end)
-        secadv = []
-        #Only select RHSA advisories
         cmp = re.compile('^RHSA')
-        for results in tmpresult:
-            if cmp.match(results["advisory_name"]):
+        for results in mergelist:
+            if (cmp.match(results["advisory_name"]) and results["advisory_name"].split('-')[1] not in dsterrata):
                 logger.debug("Adding Security Advisory [%s]\n" % results["advisory_name"])
-                secadv.append(results["advisory_name"].strip())
+                advisories.append(results["advisory_name"].strip())
 
-        advisories = secadv
-        mkBackup(advisories, "advisories")
-        logger.info("Cloning [%s] errata\n" % len(advisories))
-        try:
-            result = sat_client.errata.cloneAsync(sat_sessionkey, destination, advisories)
-        except Exception, e:
-            logger.warn("Error occurred. Errata cloning should continue asynchronously.")
     else:
-        logger.info("Generating errata list")
-        try:
-         mergelist = sat_client.channel.software.listErrata(sat_sessionkey, origin, beginning, end)
-        except Exception, e:
-            logger.critical("Error occurred generating list of errata to merge")
-            logger.exception(e)
-            sys.exit(1)
+        for results in mergelist:
+            if (results["advisory_name"].split('-')[1] not in dsterrata):
+                logger.debug("Errata ID [%s] not in destination channel" % results["advisory_name"])
+                advisories.append(results["advisory_name"].strip())
+            else:
+                logger.debug("Skipping [%s]\n" % results["advisory_name"])
 
-        mergeids = []
-        for q in mergelist:
-            mergeids.append(q["id"])
 
-        mkBackup(mergeids, "mergeid")
-        try:
-            result = mergeChannelErrata(sat_client, sat_sessionkey, origin, destination, beginning, end)
-            if not result:
-                rmBackup("mergeid")
-                logger.warn("No errata to merge")
-                return
+    mkBackup(advisories, "advisories")
 
-        except xmlrpclib.Fault, e:
-            logger.critical("!!! Got XMLRPC Fault !!!")
-            logger.exception(e)
-            return XMLRPCERR
-        logger.info("Errata merged sucessfully")
-        logger.debug("Displaying results:\n\n\n")
+    logger.info("Cloning [%s] errata\n" % len(advisories))
 
-        for results in result:
-            advisories.append(results["advisory_name"])
+    try:
+        result = sat_client.errata.cloneAsync(sat_sessionkey, dst, advisories)
+	if not result:
+	    rmBackup("mergeid")
+	    logger.warn("No errata to merge")
+    except Exception, e:
+        logger.warn("Error occurred. Errata cloning should continue asynchronously.")
 
-        logger.info("full advisory list is [%s] items long\n" % len(advisories))
+    logger.info("Errata merged sucessfully")
+    logger.info("full advisory list is [%s] items long\n" % len(advisories))
 
-        mkBackup(advisories, "advisories")
-        rmBackup("mergeid")
+    mkBackup(advisories, "advisories")
+    rmBackup("mergeid")
 
 
     # get list of packages from advisory list
@@ -144,7 +137,7 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa=0):
             for a in pkgid:
                 if a["providing_channels"]:
                     logger.debug("Pkg [%s] channel validated." % a["id"])
-                    if origin in a["providing_channels"]:
+                    if src in a["providing_channels"]:
                         logger.debug("Pkg [%s] arch [%s] validated." % (a["id"],a["providing_channels"]))
                         pkgs.append(a["id"])
                     else:
@@ -155,7 +148,7 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa=0):
     except xmlrpclib.Fault, e:
         logger.critical("ERROR: XMLRPC Fault")
         logger.exception(e)
-        return XMLRPCERR
+        return e 
 
     # dedupe array of packages
     uniqpkgs = []
@@ -166,15 +159,23 @@ def errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa=0):
 
     # add packages to channel
     try:
-        logger.info("Adding [%s] pkg IDs to channel [%s]\n" % (len(uniqpkgs),destination))
-        addErrataPkgs(sat_client,sat_sessionkey,destination,uniqpkgs)
-    except (xmlrpclib.Fault,xmlrpclib.ProtocolError), e:
-        logger.critical("ERROR adding packages to channel [%s]" % destination)
+        logger.info("Adding [%s] pkg IDs to channel [%s]\n" % (len(uniqpkgs),dst))
+        addErrataPkgs(sat_client,sat_sessionkey,dst,uniqpkgs)
+    except xmlrpclib.ProtocolError, e:
+	if e.errcode == 503:
+	    logger.info("503 error occurred with Satellite. Sleeping for 90 seconds and retrying.")
+	    sleep(90)
+	    logger.info("Retrying addErrataPkgs...")
+	    addErrataPkgs(sat_client,sat_sessionkey,dst,uniqpkgs)
+	else:
+            logger.critical("xmlrpclib.ProtocolError adding packages to channel [%s]" % dst)
+	    logger.exception(e)
+    except (xmlrpclib.Fault), e:
+        logger.critical("xmlrpclib.Fault adding packages to channel [%s]" % dst)
         logger.critical("Writing list of pkg IDs to recovery file.")
         logger.exception(e)
-        return
+        return e
 
-    # log out of the satellite for good behavior
     rmBackup("pkgids")
 ###### END errataProcess ########
 
@@ -263,13 +264,17 @@ def main():
     if (options.config and (options.origin or options.destination)):
         logger.critical("The config file and (source and/or destination) options are mutually exclusive. You must specify EITHER a source and destination channel, OR a config file containing a list of sources and destination channels for merge operations")
         return 100
-    else:
-        logger.info("Config file specified")
-        config = options.config
+
+    config = options.config
 
     if (options.origin and options.destination):
-        origin = options.origin
-        destination = options.destination
+        src = options.origin
+        dst = options.destination
+    elif (options.config):
+        logger.info("Config file specified")
+    else:
+        logger.critical("Source and destination must both be specified")
+        return 100
 
     if not ( options.username and options.serverfqdn and options.end ):
         logger.critical("Must specify login, server, and end date options. See usage")
@@ -291,7 +296,8 @@ def main():
             rhsa = options.rhsa_only
         else:
             rhsa = options.rhsa_only
-            recover = options.recovery
+
+        recover = options.recovery
 
     if not options.password:
         password = getpass.getpass("%s's password:" % login)
@@ -315,7 +321,7 @@ def main():
         logger.critical("!!! Got XMLRPC error !!!")
         logger.critical("!!! Check Satellite FQDN and login information; You can also look at /var/log/httpd/error_log on the Satellite for more info !!!")
         logger.exception(e)
-        return XMLRPCERR
+        #return XMLRPCERR
     except socket.error, e:
         logger.critical("!!! Got socket error !!!")
         logger.critical("!!! Could not connect to %s" % serverfqdn)
@@ -333,12 +339,12 @@ def main():
     except xmlrpclib.Fault, e:
         logger.critical("!!! Got XMLRPC fault\n\t%s")
         logger.exception(e)
-        return XMLRPCERR
+#        return XMLRPCERR
 
     #check if running in recovery mode
     if recover:
         logger.warn("Running in recovery mode. Beginning recovery...")
-        recoverStart(sat_client, sat_sessionkey, destination)
+        recoverStart(sat_client, sat_sessionkey, dst)
 
     checkRecover()
 
@@ -374,7 +380,7 @@ def main():
                 errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end, rhsa)
 
     else:
-        errataProcess(sat_client, sat_sessionkey, origin, destination, beginning, end)
+        errataProcess(sat_client, sat_sessionkey, src, dst, beginning, end)
 
     logger.info("Logging out of the Satellite")
     try:
@@ -382,7 +388,7 @@ def main():
     except xmlrpclib.Fault, e:
         logger.critical("!!! Got XMLRPC fault !!!")
         logger.exception(e)
-        return XMLRPCERR
+#        return XMLRPCERR
 
     return SUCCESS
 
